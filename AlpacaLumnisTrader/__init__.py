@@ -1,1 +1,1 @@
-from AlpacaLumnisTrader import AlpacaLumnisTrader
+from AlpacaLumnisTrader.AlpacaLumnisTrader import AlpacaLumnisTrader
