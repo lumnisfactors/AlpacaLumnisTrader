@@ -1,0 +1,11 @@
+grequests
+matplotlib
+pandas
+numpy
+scipy
+scikit-learn
+seaborn
+alpaca-trade-api
+alpaca-py
+lumnisfactors
+tqdm
