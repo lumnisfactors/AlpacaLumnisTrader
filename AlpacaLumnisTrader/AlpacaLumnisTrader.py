@@ -1,4 +1,4 @@
-from utils import standardize, getDailyVol
+from .utils import standardize, getDailyVol
 
 from lumnisfactors import LumnisFactors
 
