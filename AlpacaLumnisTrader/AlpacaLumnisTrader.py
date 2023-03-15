@@ -54,13 +54,9 @@ class AlpacaLumnisTrader():
 
         self.trading_client  = TradingClient(binance_api_key, binance_secret_key, paper=paper)
         self.tradable_assets = self.get_tradable_assets(coins)
-        print(len(self.tradable_assets))
         self.time_frame      = time_frame
         self.lumnisfactors   = LumnisFactors(lumnis_api_key)
         self.factors         = factors
-
-        for asset in self.tradable_assets:
-            print(asset.symbol)
 
         self.tp              = 2
         self.sl              = 2
@@ -139,7 +135,6 @@ class AlpacaLumnisTrader():
                     if signal == 1:
                         take_profit = close + (self.tp * vol * close) 
                         stop_loss   = close - (self.sl * vol * close) 
-                        print(take_profit, stop_loss)
 
                         order = self.submit_order(symbol, qty, side, take_profit=take_profit, stop_loss=stop_loss)
                         # print(order)
