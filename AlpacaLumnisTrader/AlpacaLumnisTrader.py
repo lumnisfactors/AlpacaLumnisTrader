@@ -1,4 +1,4 @@
-from .utils import standardize, getDailyVol
+from utils import standardize, getDailyVol
 
 from lumnisfactors import LumnisFactors
 
@@ -50,15 +50,14 @@ class AlpacaLumnisTrader():
     Attributes
     ----------
     """
-    def __init__(self, binance_api_key, binance_secret_key, lumnis_api_key, coins, paper=True, time_frame="min"):
+    def __init__(self, binance_api_key, binance_secret_key, lumnis_api_key, factors, coins, paper=True, time_frame="min"):
 
         self.trading_client  = TradingClient(binance_api_key, binance_secret_key, paper=paper)
         self.tradable_assets = self.get_tradable_assets(coins)
         self.time_frame      = time_frame
         self.lumnisfactors   = LumnisFactors(lumnis_api_key)
-        self.factors         = ['macd'] #['rsi', 'vpin', 'order_imbalance', 'kyle_lambda_signed', 'amihuds_lambda',  'ffd', 'macd', 'obv', 'donchian','tsmom', 'bvc', 'hurst_exponent', 'anderson_darling_norm', 'anderson_darling_expon', 'shapiro_wilk','kolmogorov_smirnov', 'jarque_bera', 'agostino_k2']
-
-        #'hasbroucks_lambda', 'accumulation_distribution', 
+        self.factors         = factors
+        
         for asset in self.tradable_assets:
             print(asset.symbol)
 
