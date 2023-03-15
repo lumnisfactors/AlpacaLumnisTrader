@@ -54,10 +54,11 @@ class AlpacaLumnisTrader():
 
         self.trading_client  = TradingClient(binance_api_key, binance_secret_key, paper=paper)
         self.tradable_assets = self.get_tradable_assets(coins)
+        print(len(self.tradable_assets))
         self.time_frame      = time_frame
         self.lumnisfactors   = LumnisFactors(lumnis_api_key)
         self.factors         = factors
-        
+
         for asset in self.tradable_assets:
             print(asset.symbol)
 
@@ -138,6 +139,7 @@ class AlpacaLumnisTrader():
                     if signal == 1:
                         take_profit = close + (self.tp * vol * close) 
                         stop_loss   = close - (self.sl * vol * close) 
+                        print(take_profit, stop_loss)
 
                         order = self.submit_order(symbol, qty, side, take_profit=take_profit, stop_loss=stop_loss)
                         # print(order)
@@ -161,10 +163,10 @@ class AlpacaLumnisTrader():
         
         """
         raw_df  = self.history[symbol]
-        df      = standardize(raw_df, 10000)#['macd_250_500']
+        df      = standardize(raw_df, 10000)
 
         if strat == 'macd':
-            signal = (df['macd_250_500'].iloc[-1] > 2) * 1
+            signal = (df['vpin_500'].iloc[-1] > 2) * 1
             return signal
 
         return 0
