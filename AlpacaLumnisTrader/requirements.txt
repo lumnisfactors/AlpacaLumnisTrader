@@ -9,3 +9,4 @@ alpaca-trade-api
 alpaca-py
 lumnisfactors
 tqdm
+arcticdb

@@ -12,6 +12,7 @@ from alpaca.trading.enums import AssetClass
 from alpaca.trading.requests import MarketOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce
 from alpaca.trading.requests import TakeProfitRequest, StopLossRequest
+from arcticdb import Arctic as ArcticDB
 
 from datetime import datetime
 from tqdm import tqdm
@@ -50,7 +51,7 @@ class AlpacaLumnisTrader():
     Attributes
     ----------
     """
-    def __init__(self, binance_api_key, binance_secret_key, lumnis_api_key, factors, coins, paper=True, time_frame="min"):
+    def __init__(self, binance_api_key, binance_secret_key, lumnis_api_key, factors, coins, strategy_name="", paper=True, time_frame="min", warmup_lookback=120, s3_uri_for_logging=None):
 
         self.trading_client  = TradingClient(binance_api_key, binance_secret_key, paper=paper)
         self.tradable_assets = self.get_tradable_assets(coins)
@@ -66,7 +67,6 @@ class AlpacaLumnisTrader():
         for asset in self.tradable_assets:
             self.asset_meta_data[asset.symbol] = {
                 "min_order_size"     : asset.min_order_size,
-                "current_ret"        : 0,
                 "take_profit"        : 0,
                 "stop_loss"          : 0,
                 "stop_loss_percent"  : 0,
@@ -76,9 +76,26 @@ class AlpacaLumnisTrader():
                 "side"               : 0
             }
 
+        self.warmup_lookback    = warmup_lookback
+        if s3_uri_for_logging:
+            try:
+                self.s3_uri_for_logging = s3_uri_for_logging
+                ac = ArcticDB(s3_uri_for_logging)
+
+                if not f'logging_{strategy_name}' in ac.list_libraries():
+                    ac.create_library(f'logging_{strategy_name}')
+                
+                self.logging_db = ac[f'logging_{strategy_name}']
+            except:
+                print("Error connecting to S3")
+                self.s3_uri_for_logging = None
+                self.logging_db = None
+
+    
+
         start_time           = time.time()
-        self.history         = self.warmup_history()
-        self.price_history   = self.warmup_price_history()
+        self.history         = self.warmup_history(warmup_lookback)
+        self.price_history   = self.warmup_price_history(warmup_lookback)
         print("Warmup time: ", (time.time() - start_time) /60, "min")
 
         self.update_history()
@@ -87,7 +104,7 @@ class AlpacaLumnisTrader():
         self.MINUTE_CONDITION    = lambda interval, last_min : datetime.now().second  == interval and datetime.now().minute != last_min
     
 
-    def run(self):
+    def run(self, min_tp_sl=0, percent_acc_to_trade=0.9, update_lookback=50):
         """Runs the live trader.
 
         Parameters
@@ -101,16 +118,15 @@ class AlpacaLumnisTrader():
         """
         last_min = datetime.now().minute
         while True:
-            ## TODO: check if minutes is 00
             if self.MINUTE_CONDITION(0, last_min):
             
                 account      = self.trading_client.get_account()
-                account_cash = float( account.cash ) * 0.9
+                account_cash = float( account.cash ) * percent_acc_to_trade
                 cash_asset   = int( account_cash / len(self.tradable_assets) )
                 side         = OrderSide.BUY
 
                 try:
-                    self.update_history(50)
+                    self.update_history(update_lookback)
                 except:
                     print("Error updating history")
                     continue
@@ -119,7 +135,12 @@ class AlpacaLumnisTrader():
                     symbol      = asset.symbol
                     qty         = cash_asset / self.price_history[symbol].iloc[-1].close 
                     pos         = self.get_open_position(symbol)
-                    if pos: continue
+
+                    pos         = self.check_stop_loss(symbol, pos)
+                    pos         = self.check_take_profit(symbol, pos)
+
+                    if pos: 
+                        continue
 
                     signal    = self.get_signal(symbol)
         
@@ -133,14 +154,144 @@ class AlpacaLumnisTrader():
                     close     = self.price_history[symbol].iloc[-1].close
 
                     if signal == 1:
+                        if (self.tp * vol) < min_tp_sl:
+                            continue
+
                         take_profit = close + (self.tp * vol * close) 
                         stop_loss   = close - (self.sl * vol * close) 
 
                         order = self.submit_order(symbol, qty, side, take_profit=take_profit, stop_loss=stop_loss)
-                        # print(order)
-                        print("BUY ", symbol, " at ", close, " with ", qty, " shares", " TP: ", take_profit, " SL: ", stop_loss)
+                        if order:
+                            self.asset_meta_data[symbol]['take_profit']        = float( take_profit )
+                            self.asset_meta_data[symbol]['stop_loss']          = float( stop_loss )
+                            self.asset_meta_data[symbol]['stop_loss_percent']  = float( self.sl * vol )
+                            self.asset_meta_data[symbol]['take_profit_percent']= float( self.tp * vol )
+                            self.asset_meta_data[symbol]['price_at_excexution']= float( close )
+                            self.asset_meta_data[symbol]['qty']                = float( qty )
+                            self.asset_meta_data[symbol]['side']               = "buy"
+        
+                            curr_time                                           = datetime.now()
 
+                            if self.logging_db:
+                                self.log_to_db(symbol, side, qty, close, take_profit, stop_loss, self.sl * vol, self.tp * vol, vol)
+                                
+                            print("BUY ", symbol, " at ", close, " with ", qty, " shares", " TP: ", take_profit, " SL: ", stop_loss, " Time: ", curr_time)
+
+            
                 last_min = datetime.now().minute
+            
+    def check_stop_loss(self, symbol, pos):
+        """Check if stop loss is hit.
+
+        Parameters
+        ----------
+            symbol : str
+                The symbol used in this signal
+
+            pos : dict
+                The current position
+
+        Returns
+        -------
+            pos : dict
+                The updated position
+        
+        """
+        if pos:
+            stop_loss = self.asset_meta_data[symbol]['stop_loss']
+            price     = float( self.price_history[symbol].iloc[-1].close )
+            if price <= stop_loss:
+                print("STOP LOSS HIT")
+                self.close_position(symbol)
+                pos = False
+                if self.logging_db:
+                    self.log_to_db(symbol, "stop_loss", self.asset_meta_data[symbol]['qty'], price, self.asset_meta_data[symbol]['take_profit'], self.asset_meta_data[symbol]['stop_loss'], self.asset_meta_data[symbol]['stop_loss_percent'], self.asset_meta_data[symbol]['take_profit_percent'], self.asset_meta_data[symbol]['vol'])
+
+        return pos
+
+    
+    def check_take_profit(self, symbol, pos):
+        """Check if take profit is hit.
+
+        Parameters
+        ----------
+            symbol : str
+                The symbol used in this signal
+
+            pos : dict
+                The current position
+
+        Returns
+        -------
+            pos : dict
+                The updated position
+        
+        """
+        if pos:
+            take_profit = self.asset_meta_data[symbol]['take_profit']
+            price       = float( self.price_history[symbol].iloc[-1].close )
+            if price >= take_profit:
+                print("TAKE PROFIT HIT")
+                self.close_position(symbol)
+                pos = False
+                if self.logging_db:
+                    self.log_to_db(symbol, "take_profit", self.asset_meta_data[symbol]['qty'], price, self.asset_meta_data[symbol]['take_profit'], self.asset_meta_data[symbol]['stop_loss'], self.asset_meta_data[symbol]['stop_loss_percent'], self.asset_meta_data[symbol]['take_profit_percent'], self.asset_meta_data[symbol]['vol'])
+
+        return pos
+    
+    def log_to_db(self, symbol, side, qty, price_at_excexution, take_profit, stop_loss, stop_loss_percent, take_profit_percent, vol):
+        """Log trade to database.
+
+        Parameters
+        ----------
+            symbol : str
+                The symbol used in this signal
+
+            side : str
+                The side of the trade
+
+            qty : float
+                The quantity of the trade
+
+            price_at_excexution : float
+                The price at execution of the trade
+
+            take_profit : float
+                The take profit price
+
+            stop_loss : float
+                The stop loss price
+
+            stop_loss_percent : float
+                The stop loss percent
+
+            take_profit_percent : float
+                The take profit percent
+
+            vol : float
+                The volume of the trade
+
+        Returns
+        -------
+        
+        """
+        try:
+            curr_time                                           = datetime.now()
+            log_df                                              = pd.DataFrame(index=[curr_time])
+            log_df.loc[curr_time,'symbol']                      = symbol
+            log_df.loc[curr_time,'side']                        = side
+            log_df.loc[curr_time,'qty']                         = qty
+            log_df.loc[curr_time,'price_at_excexution']         = price_at_excexution
+            log_df.loc[curr_time,'take_profit']                 = take_profit
+            log_df.loc[curr_time,'stop_loss']                   = stop_loss
+            log_df.loc[curr_time,'stop_loss_percent']           = stop_loss_percent
+            log_df.loc[curr_time,'take_profit_percent']         = take_profit_percent
+            log_df.loc[curr_time,'vol']                         = vol
+
+            self.logging_db.append(symbol, log_df)
+
+        except Exception as e:
+            print("Error logging to db: ", e)
 
     def get_signal(self, symbol, strat='macd'):
         """Get trading signal. The core of the strategy.
@@ -366,7 +517,7 @@ class AlpacaLumnisTrader():
             except Exception as e:
                 print(e)
 
-    def warmup_history(self):
+    def warmup_history(self, lookback=120):
         """Warmup the history for each tradable asset's factors.
 
         Parameters
@@ -383,13 +534,13 @@ class AlpacaLumnisTrader():
         for asset in self.tradable_assets:
             data = []
             for factor in tqdm(self.factors):
-                df_hist         = self.get_history(factor, asset)
+                df_hist         = self.get_history(factor, asset, lookback=lookback)
                 data.append(df_hist)
             history[asset.symbol] = pd.concat(data, axis=1).fillna(method='ffill')
 
         return history
 
-    def warmup_price_history(self):
+    def warmup_price_history(self, lookback=120):
         """Warmup the price history for each tradable asset.
 
         Parameters
@@ -404,11 +555,11 @@ class AlpacaLumnisTrader():
         """
         history = {}
         for asset in self.tradable_assets:
-            df_hist         = self.get_history('price', asset)
+            df_hist         = self.get_history('price', asset, lookback=lookback)
             history[asset.symbol] = df_hist.fillna(method='ffill')
         return history
     
-    def get_history(self, factor, asset):
+    def get_history(self, factor, asset, lookback=80):
         """Gets price history for an asset and factor
 
         Parameters
@@ -426,7 +577,7 @@ class AlpacaLumnisTrader():
         
         """
         today = pd.to_datetime("today") - pd.Timedelta(days=1.5)
-        start = today - pd.Timedelta(days=80)
+        start = today - pd.Timedelta(days=lookback)
         
         today = today.strftime("%Y-%m-%d")
         start = start.strftime("%Y-%m-%d")
