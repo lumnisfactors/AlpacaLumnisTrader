@@ -54,10 +54,10 @@ class AlpacaLumnisTrader():
     def __init__(self, binance_api_key, binance_secret_key, lumnis_api_key, factors, coins, strategy_name="", paper=True, time_frame="min", warmup_lookback=120, s3_uri_for_logging=None):
 
         self.trading_client  = TradingClient(binance_api_key, binance_secret_key, paper=paper)
-        self.tradable_assets = self.get_tradable_assets(coins)
+        self.tradable_assets = self.get_tradable_assets(list( set( coins) ))
         self.time_frame      = time_frame
         self.lumnisfactors   = LumnisFactors(lumnis_api_key)
-        self.factors         = factors
+        self.factors         = list( set( factors ) )
 
         self.tp              = 2
         self.sl              = 2
@@ -584,7 +584,7 @@ class AlpacaLumnisTrader():
 
         df_hist         = self.lumnisfactors.get_historical_data(factor, "binance", asset.symbol.replace("/", ""),  self.time_frame, start, today)
         df_hist.index   = pd.to_datetime(df_hist.index, utc=True)
-        df_hist         = df_hist[~df_hist.index.duplicated(keep='first')]
+        df_hist         = df_hist[~df_hist.index.duplicated(keep='first')].dropna()
 
         return df_hist
     
@@ -607,11 +607,17 @@ class AlpacaLumnisTrader():
             df_live                           = self.lumnisfactors.get_multifactor_live_data(self.factors, "binance", symbol, self.time_frame, lookback)
             df_live.index                     = pd.to_datetime(df_live.index, utc=True)
 
+            idx                               = df_live.index.difference(self.history[asset.symbol].index)
+            df_live                           = df_live.loc[idx].dropna()
+
             self.history[asset.symbol]        = pd.concat([self.history[asset.symbol], df_live], axis=0)
             self.history[asset.symbol]        = self.history[asset.symbol][~self.history[asset.symbol].index.duplicated(keep='first')].sort_index()
                     
             df_live                           = self.lumnisfactors.get_live_data('price', "binance", symbol, self.time_frame, lookback)
             df_live.index                     = pd.to_datetime(df_live.index, utc=True)
-        
+
+            idx                               = df_live.index.difference(self.price_history[asset.symbol].index)
+            df_live                           = df_live.loc[idx].dropna()
+
             self.price_history[asset.symbol]  = pd.concat([self.price_history[asset.symbol], df_live], axis=0)
             self.price_history[asset.symbol]  = self.price_history[asset.symbol][~self.price_history[asset.symbol].index.duplicated(keep='first')].sort_index()
