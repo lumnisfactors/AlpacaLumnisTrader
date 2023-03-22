@@ -54,10 +54,10 @@ class AlpacaLumnisTrader():
     def __init__(self, binance_api_key, binance_secret_key, lumnis_api_key, factors, coins, strategy_name="", paper=True, time_frame="min", warmup_lookback=120, s3_uri_for_logging=None):
 
         self.trading_client  = TradingClient(binance_api_key, binance_secret_key, paper=paper)
-        self.tradable_assets = self.get_tradable_assets(coins)
+        self.tradable_assets = self.get_tradable_assets(list( set( coins) ))
         self.time_frame      = time_frame
         self.lumnisfactors   = LumnisFactors(lumnis_api_key)
-        self.factors         = factors
+        self.factors         = list( set( factors ) )
 
         self.tp              = 2
         self.sl              = 2
