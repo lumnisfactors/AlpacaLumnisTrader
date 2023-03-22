@@ -77,6 +77,9 @@ class AlpacaLumnisTrader():
             }
 
         self.warmup_lookback    = warmup_lookback
+        self.logging_db         = None
+        self.s3_uri_for_logging = None
+        
         if s3_uri_for_logging:
             try:
                 self.s3_uri_for_logging = s3_uri_for_logging
@@ -576,11 +579,11 @@ class AlpacaLumnisTrader():
                 Dataframe containing history for asset and factor
         
         """
-        today = pd.to_datetime("today") - pd.Timedelta(days=1.5)
-        start = today - pd.Timedelta(days=lookback)
+        today           = pd.to_datetime("today") - pd.Timedelta(days=1.5)
+        start           = today - pd.Timedelta(days=lookback)
         
-        today = today.strftime("%Y-%m-%d")
-        start = start.strftime("%Y-%m-%d")
+        today           = today.strftime("%Y-%m-%d")
+        start           = start.strftime("%Y-%m-%d")
 
         df_hist         = self.lumnisfactors.get_historical_data(factor, "binance", asset.symbol.replace("/", ""),  self.time_frame, start, today)
         df_hist.index   = pd.to_datetime(df_hist.index, utc=True)
