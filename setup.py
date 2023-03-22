@@ -5,14 +5,14 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="alpaca-lumnis-trader",
-    packages = ['alpaca-lumnis-trader'],
-    version="0.0.2",
+    packages = ['AlpacaLumnisTrader'],
+    version="0.0.9",
     author="Abubakarr Jaye",
     author_email="contact@lumnis.io",
     description="Lumnis Alternative Data",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/lumnisfactors/AlpacaLumnisTrader/archive/refs/tags/0.0.2.tar.gz",
+    url="https://github.com/lumnisfactors/AlpacaLumnisTrader/archive/refs/tags/0.0.9.tar.gz",
     py_modules = ["alpaca-lumnis"],
     install_requires=[
         'grequests',
@@ -25,7 +25,8 @@ setuptools.setup(
         'alpaca-trade-api',
         'alpaca-py',
         'lumnisfactors',
-        'tqdm'
+        'tqdm',
+        'arcticdb'
 ],
     classifiers=[
         "Programming Language :: Python :: 3",
