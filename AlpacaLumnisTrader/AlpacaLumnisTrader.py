@@ -72,7 +72,8 @@ class AlpacaLumnisTrader():
                 "take_profit_percent": 0,
                 "price_at_excexution": 0,
                 "qty"                : 0,
-                "side"               : 0
+                "side"               : 0,
+                "vol"                : 0,  
             }
 
         self.warmup_lookback    = warmup_lookback
@@ -175,6 +176,7 @@ class AlpacaLumnisTrader():
                             self.asset_meta_data[symbol]['price_at_excexution']= float( close )
                             self.asset_meta_data[symbol]['qty']                = float( qty )
                             self.asset_meta_data[symbol]['side']               = "buy"
+                            self.asset_meta_data[symbol]['vol']                = float( vol )
         
                             curr_time                                           = datetime.now()
 
