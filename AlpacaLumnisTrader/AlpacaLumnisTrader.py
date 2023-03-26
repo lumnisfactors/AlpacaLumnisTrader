@@ -209,8 +209,8 @@ class AlpacaLumnisTrader():
 
             curr_ret = self.get_current_ret(symbol)
             # if price <= stop_loss:
-            if curr_ret and curr_ret <= -self.asset_meta_data[symbol]['stop_loss_percent']:
-                print("STOP LOSS HIT")
+            if curr_ret and float( curr_ret ) <= -float( self.asset_meta_data[symbol]['stop_loss_percent']):
+                print("STOP LOSS HIT", curr_ret)
                 self.close_position(symbol)
                 pos = False
                 if self.logging_db:
@@ -242,8 +242,8 @@ class AlpacaLumnisTrader():
             curr_ret = self.get_current_ret(symbol)
 
             # if price >= take_profit:
-            if curr_ret >= self.asset_meta_data[symbol]['take_profit_percent']:
-                print("TAKE PROFIT HIT")
+            if curr_ret and float(curr_ret) >= float ( self.asset_meta_data[symbol]['take_profit_percent']):
+                print("TAKE PROFIT HIT", curr_ret)
                 self.close_position(symbol)
                 pos = False
                 if self.logging_db:
