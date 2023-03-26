@@ -12,7 +12,6 @@ from alpaca.trading.enums import AssetClass
 from alpaca.trading.requests import MarketOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce
 from alpaca.trading.requests import TakeProfitRequest, StopLossRequest
-from arcticdb import Arctic as ArcticDB
 
 from datetime import datetime
 from tqdm import tqdm
@@ -51,7 +50,7 @@ class AlpacaLumnisTrader():
     Attributes
     ----------
     """
-    def __init__(self, binance_api_key, binance_secret_key, lumnis_api_key, factors, coins, strategy_name="", paper=True, time_frame="min", warmup_lookback=120, s3_uri_for_logging=None):
+    def __init__(self, binance_api_key, binance_secret_key, lumnis_api_key, factors, coins, strategy_name="", paper=True, time_frame="min", warmup_lookback=120, arctic_for_logging=None):
 
         self.trading_client  = TradingClient(binance_api_key, binance_secret_key, paper=paper)
         self.tradable_assets = self.get_tradable_assets(list( set( coins) ))
@@ -78,12 +77,12 @@ class AlpacaLumnisTrader():
 
         self.warmup_lookback    = warmup_lookback
         self.logging_db         = None
-        self.s3_uri_for_logging = None
+        self.arctic_for_logging = None
         
-        if s3_uri_for_logging:
+        if arctic_for_logging:
             try:
-                self.s3_uri_for_logging = s3_uri_for_logging
-                ac = ArcticDB(s3_uri_for_logging)
+                self.arctic_for_logging = arctic_for_logging
+                ac = arctic_for_logging
 
                 if not f'logging_{strategy_name}' in ac.list_libraries():
                     ac.create_library(f'logging_{strategy_name}')
@@ -91,7 +90,7 @@ class AlpacaLumnisTrader():
                 self.logging_db = ac[f'logging_{strategy_name}']
             except:
                 print("Error connecting to S3")
-                self.s3_uri_for_logging = None
+                self.arctic_for_logging = None
                 self.logging_db = None
 
     
@@ -107,7 +106,7 @@ class AlpacaLumnisTrader():
         self.MINUTE_CONDITION    = lambda interval, last_min : datetime.now().second  == interval and datetime.now().minute != last_min
     
 
-    def run(self, min_tp_sl=0, percent_acc_to_trade=0.9, update_lookback=50):
+    def run(self, min_tp_sl=0, percent_acc_to_trade=0.9, update_lookback=50, interval=0):
         """Runs the live trader.
 
         Parameters
@@ -121,17 +120,21 @@ class AlpacaLumnisTrader():
         """
         last_min = datetime.now().minute
         while True:
-            if self.MINUTE_CONDITION(0, last_min):
-            
-                account      = self.trading_client.get_account()
-                account_cash = float( account.cash ) * percent_acc_to_trade
-                cash_asset   = int( account_cash / len(self.tradable_assets) )
-                side         = OrderSide.BUY
+            if self.MINUTE_CONDITION(interval, last_min):
+                
+                try:
+                    account      = self.trading_client.get_account()
+                    account_cash = float( account.cash ) * percent_acc_to_trade
+                    cash_asset   = int( account_cash / len(self.tradable_assets) )
+                    side         = OrderSide.BUY
+                except Exception as e:
+                    print("Error getting account", e)
+                    continue
 
                 try:
                     self.update_history(update_lookback)
-                except:
-                    print("Error updating history")
+                except Exception as e:
+                    print("Error updating history", e)
                     continue
                 
                 for asset in self.tradable_assets:
@@ -203,7 +206,10 @@ class AlpacaLumnisTrader():
         if pos:
             stop_loss = self.asset_meta_data[symbol]['stop_loss']
             price     = float( self.price_history[symbol].iloc[-1].close )
-            if price <= stop_loss:
+
+            curr_ret = self.get_current_ret(symbol)
+            # if price <= stop_loss:
+            if curr_ret and curr_ret <= -self.asset_meta_data[symbol]['stop_loss_percent']:
                 print("STOP LOSS HIT")
                 self.close_position(symbol)
                 pos = False
@@ -233,7 +239,10 @@ class AlpacaLumnisTrader():
         if pos:
             take_profit = self.asset_meta_data[symbol]['take_profit']
             price       = float( self.price_history[symbol].iloc[-1].close )
-            if price >= take_profit:
+            curr_ret = self.get_current_ret(symbol)
+
+            # if price >= take_profit:
+            if curr_ret >= self.asset_meta_data[symbol]['take_profit_percent']:
                 print("TAKE PROFIT HIT")
                 self.close_position(symbol)
                 pos = False
@@ -587,7 +596,7 @@ class AlpacaLumnisTrader():
 
         df_hist         = self.lumnisfactors.get_historical_data(factor, "binance", asset.symbol.replace("/", ""),  self.time_frame, start, today)
         df_hist.index   = pd.to_datetime(df_hist.index, utc=True)
-        df_hist         = df_hist[~df_hist.index.duplicated(keep='first')].dropna()
+        df_hist         = df_hist[~df_hist.index.duplicated(keep='first')].dropna().sort_index()
 
         return df_hist
     
@@ -611,7 +620,7 @@ class AlpacaLumnisTrader():
             df_live.index                     = pd.to_datetime(df_live.index, utc=True)
 
             idx                               = df_live.index.difference(self.history[asset.symbol].index)
-            df_live                           = df_live.loc[idx].dropna()
+            df_live                           = df_live.loc[idx].dropna().sort_index()
 
             self.history[asset.symbol]        = pd.concat([self.history[asset.symbol], df_live], axis=0)
             self.history[asset.symbol]        = self.history[asset.symbol][~self.history[asset.symbol].index.duplicated(keep='first')].sort_index()
@@ -620,7 +629,7 @@ class AlpacaLumnisTrader():
             df_live.index                     = pd.to_datetime(df_live.index, utc=True)
 
             idx                               = df_live.index.difference(self.price_history[asset.symbol].index)
-            df_live                           = df_live.loc[idx].dropna()
+            df_live                           = df_live.loc[idx].dropna().sort_index()
 
             self.price_history[asset.symbol]  = pd.concat([self.price_history[asset.symbol], df_live], axis=0)
             self.price_history[asset.symbol]  = self.price_history[asset.symbol][~self.price_history[asset.symbol].index.duplicated(keep='first')].sort_index()
